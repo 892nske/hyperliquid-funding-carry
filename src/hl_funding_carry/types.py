@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
+
+import pandas as pd
 
 CANDLE_COLUMNS: Final[tuple[str, ...]] = (
     "timestamp",
@@ -43,3 +47,13 @@ RESEARCH_COLUMNS: Final[tuple[str, ...]] = (
     "spread_bps",
     "spot_price",
 )
+
+
+@dataclass
+class BacktestResult:
+    run_id: str
+    summary: dict[str, float | str]
+    ledger: pd.DataFrame
+    trades: pd.DataFrame
+    equity_curve: pd.DataFrame
+    artifact_dir: Path | None = None

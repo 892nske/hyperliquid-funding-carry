@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from hl_funding_carry.backtest.events import infer_bar_interval_minutes
 from hl_funding_carry.types import RESEARCH_COLUMNS
 
 
@@ -28,15 +29,24 @@ def build_funding_features(df: pd.DataFrame) -> pd.DataFrame:
     features["symbol"] = features["symbol"].astype(str).str.upper().str.strip()
     features = features.sort_values(["symbol", "timestamp"]).reset_index(drop=True)
 
+    bar_interval_minutes = infer_bar_interval_minutes(features)
+    one_hour_periods = max(1, int(round(60 / bar_interval_minutes)))
+    four_hour_periods = max(1, int(round(240 / bar_interval_minutes)))
+    twenty_four_hour_periods = max(1, int(round(1440 / bar_interval_minutes)))
+
     features["basis"] = (
         (features["mark_price"] - features["oracle_price"]) / features["oracle_price"]
     )
     features["basis_bps"] = features["basis"] * 10000.0
-    features["basis_change_1h"] = features.groupby("symbol")["basis"].diff()
-    features["oi_change_1h"] = features.groupby("symbol")["open_interest"].pct_change()
-    features["oi_change_4h"] = features.groupby("symbol")["open_interest"].pct_change(periods=4)
+    features["basis_change_1h"] = features.groupby("symbol")["basis"].diff(periods=one_hour_periods)
+    features["oi_change_1h"] = features.groupby("symbol")["open_interest"].pct_change(
+        periods=one_hour_periods,
+    )
+    features["oi_change_4h"] = features.groupby("symbol")["open_interest"].pct_change(
+        periods=four_hour_periods,
+    )
     features["funding_z_24h"] = features.groupby("symbol")["current_funding"].transform(
-        lambda series: _rolling_zscore(series, window=24),
+        lambda series: _rolling_zscore(series, window=twenty_four_hour_periods),
     )
     features["spread_ok"] = np.isfinite(features["spread_bps"]).astype(int)
 

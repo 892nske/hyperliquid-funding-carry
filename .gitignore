@@ -20,4 +20,6 @@ build/
 !/data/interim/.gitkeep
 !/data/features/.gitkeep
 !/data/backtests/.gitkeep
+/artifacts/*
+!/artifacts/.gitkeep
 *:Zone.Identifier

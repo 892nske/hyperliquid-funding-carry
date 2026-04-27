@@ -27,14 +27,53 @@ uv run ruff check .
 uv run mypy src
 ```
 
-## Minimal backtest
+## Week2 improvements
+- explicit hourly funding event timing in UTC
+- 2-leg spot/perp ledger with separated PnL decomposition
+- time-aware entry/exit windows around funding events
+- artifact saving for backtests and sweeps
+- parameter sweep runner for research comparisons
+
+## Usage
 Run the sample end-to-end funding carry backtest with:
+
+```bash
+uv run python -m hl_funding_carry backtest --config configs/funding_carry.base.yaml
+```
+
+The old week1 form still works:
 
 ```bash
 uv run python -m hl_funding_carry --config configs/funding_carry.base.yaml
 ```
 
-The base config points at sample CSV files under `data/raw/`.
+Run a parameter sweep with:
+
+```bash
+uv run python -m hl_funding_carry sweep --config configs/funding_carry.base.yaml --grid configs/funding_carry.sweep.yaml
+```
+
+Use `--output-dir` to control where artifacts are saved.
+
+## Artifacts
+Backtest and sweep outputs are saved under `artifacts/` by default.
+
+Single backtest output includes:
+- `summary.csv`
+- `equity_curve.csv`
+- `trades.csv`
+- `ledger.csv`
+- `params.json`
+
+Sweep output includes:
+- top-level `summary.csv` and `summary.parquet`
+- per-run subdirectories under `runs/`
+
+## Accounting assumptions
+- timestamps are treated as UTC internally
+- funding pnl is only accrued on explicit funding event timestamps
+- `spot_perp` mode records separate spot and perp legs for research
+- margin, borrowing, liquidation, and live execution are still out of scope
 
 ## Proposed package layout
 See [`docs/project_structure.md`](docs/project_structure.md).

@@ -1,15 +1,92 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 
+from hl_funding_carry.backtest.events import as_timestamp
 from hl_funding_carry.backtest.metrics import summarize_backtest
 from hl_funding_carry.settings import FundingCarryConfig
+from hl_funding_carry.types import BacktestResult
+
+
+def _build_trade_log(ledger: pd.DataFrame) -> pd.DataFrame:
+    trades: list[dict[str, Any]] = []
+    for symbol, symbol_df in ledger.groupby("symbol", sort=True):
+        open_trade: dict[str, Any] | None = None
+        for _, row in symbol_df.iterrows():
+            timestamp = as_timestamp(row["timestamp"])
+            position_pair = float(row["position_pair"])
+            if open_trade is None and position_pair != 0.0:
+                open_trade = {
+                    "symbol": symbol,
+                    "entry_time": timestamp,
+                    "entry_side": row["entry_side"],
+                    "direction": float(row["position_pair"]),
+                    "funding_event_time": row["active_funding_event_time"],
+                }
+            if open_trade is not None:
+                open_trade.setdefault("trade_rows", [])
+                open_trade["trade_rows"].append(row)
+                if position_pair == 0.0:
+                    trade_rows = pd.DataFrame(open_trade.pop("trade_rows"))
+                    entry_time = as_timestamp(open_trade["entry_time"])
+                    exit_time = timestamp
+                    trades.append(
+                        {
+                            **open_trade,
+                            "exit_time": exit_time,
+                            "holding_minutes": (
+                                exit_time - entry_time
+                            ).total_seconds()
+                            / 60.0,
+                            "price_pnl_spot": float(trade_rows["price_pnl_spot"].sum()),
+                            "price_pnl_perp": float(trade_rows["price_pnl_perp"].sum()),
+                            "funding_pnl": float(trade_rows["funding_pnl"].sum()),
+                            "fee": float(trade_rows["fee"].sum()),
+                            "slippage": float(trade_rows["slippage"].sum()),
+                            "total_pnl": float(trade_rows["total_pnl"].sum()),
+                        },
+                    )
+                    open_trade = None
+        if open_trade is not None:
+            trade_rows = pd.DataFrame(open_trade.pop("trade_rows"))
+            exit_time = as_timestamp(symbol_df.iloc[-1]["timestamp"])
+            entry_time = as_timestamp(open_trade["entry_time"])
+            trades.append(
+                {
+                    **open_trade,
+                    "exit_time": exit_time,
+                    "holding_minutes": (exit_time - entry_time).total_seconds() / 60.0,
+                    "price_pnl_spot": float(trade_rows["price_pnl_spot"].sum()),
+                    "price_pnl_perp": float(trade_rows["price_pnl_perp"].sum()),
+                    "funding_pnl": float(trade_rows["funding_pnl"].sum()),
+                    "fee": float(trade_rows["fee"].sum()),
+                    "slippage": float(trade_rows["slippage"].sum()),
+                    "total_pnl": float(trade_rows["total_pnl"].sum()),
+                },
+            )
+    return pd.DataFrame(trades)
+
+
+def _build_equity_curve(ledger: pd.DataFrame) -> pd.DataFrame:
+    equity_curve = (
+        ledger.groupby("timestamp", as_index=False)[
+            ["price_pnl_spot", "price_pnl_perp", "funding_pnl", "fee", "slippage", "total_pnl"]
+        ]
+        .sum()
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
+    equity_curve["cum_pnl"] = equity_curve["total_pnl"].cumsum()
+    return equity_curve
 
 
 def simulate_backtest(
     target_df: pd.DataFrame,
     config: FundingCarryConfig,
-) -> tuple[pd.DataFrame, dict[str, float]]:
+    run_id: str = "single",
+) -> BacktestResult:
     records: list[pd.DataFrame] = []
     fee_rate = config.execution.fee_bps_taker / 10000.0
     slippage_rate = config.execution.slippage_bps / 10000.0
@@ -28,7 +105,11 @@ def simulate_backtest(
         frame["price_pnl_spot"] = frame["position_spot"] * frame["spot_return"]
         frame["price_pnl_perp"] = frame["position_perp"] * frame["perp_return"]
         frame["price_pnl"] = frame["price_pnl_spot"] + frame["price_pnl_perp"]
-        frame["funding_pnl"] = -frame["position_perp"] * frame["current_funding"]
+        frame["funding_pnl"] = 0.0
+        event_mask = frame["is_funding_event"] == 1
+        frame.loc[event_mask, "funding_pnl"] = (
+            -frame.loc[event_mask, "position_perp"] * frame.loc[event_mask, "current_funding"]
+        )
 
         frame["spot_turnover"] = (
             frame["position_spot"].diff().abs().fillna(frame["position_spot"].abs())
@@ -37,43 +118,27 @@ def simulate_backtest(
             frame["position_perp"].diff().abs().fillna(frame["position_perp"].abs())
         )
         frame["fee"] = (frame["spot_turnover"] + frame["perp_turnover"]) * fee_rate
-        frame["slippage_cost"] = (
-            (frame["spot_turnover"] + frame["perp_turnover"]) * slippage_rate
-        )
+        frame["slippage"] = (frame["spot_turnover"] + frame["perp_turnover"]) * slippage_rate
         frame["total_pnl"] = (
-            frame["price_pnl"] + frame["funding_pnl"] - frame["fee"] - frame["slippage_cost"]
+            frame["price_pnl_spot"]
+            + frame["price_pnl_perp"]
+            + frame["funding_pnl"]
+            - frame["fee"]
+            - frame["slippage"]
         )
-        frame["cum_pnl"] = frame["total_pnl"].cumsum()
-        frame["position_change"] = frame["position_pair"].diff().fillna(frame["position_pair"])
-
-        trade_ids: list[int | None] = []
-        holding_hours: list[float] = []
-        trade_id = 0
-        open_trade_id: int | None = None
-        entry_time: pd.Timestamp | None = None
-
-        for _, row in frame.iterrows():
-            position = float(row["position_pair"])
-            timestamp = pd.Timestamp(row["timestamp"])
-            if position != 0.0 and open_trade_id is None:
-                trade_id += 1
-                open_trade_id = trade_id
-                entry_time = timestamp
-            elif position == 0.0 and open_trade_id is not None:
-                open_trade_id = None
-                entry_time = None
-
-            trade_ids.append(open_trade_id)
-            if open_trade_id is None or entry_time is None:
-                holding_hours.append(0.0)
-            else:
-                holding_hours.append((timestamp - entry_time).total_seconds() / 3600.0)
-
-        frame["trade_id"] = trade_ids
-        frame["holding_hours"] = holding_hours
         records.append(frame)
 
-    backtest_df = pd.concat(records, ignore_index=True).sort_values(["timestamp", "symbol"])
-    backtest_df = backtest_df.reset_index(drop=True)
-    summary = summarize_backtest(backtest_df)
-    return backtest_df, summary
+    ledger = pd.concat(records, ignore_index=True).sort_values(["timestamp", "symbol"])
+    ledger = ledger.reset_index(drop=True)
+    trades = _build_trade_log(ledger)
+    equity_curve = _build_equity_curve(ledger)
+    summary_values = summarize_backtest(ledger, trades, equity_curve)
+    summary: dict[str, float | str] = {key: value for key, value in summary_values.items()}
+    summary["run_id"] = run_id
+    return BacktestResult(
+        run_id=run_id,
+        summary=summary,
+        ledger=ledger,
+        trades=trades,
+        equity_curve=equity_curve,
+    )

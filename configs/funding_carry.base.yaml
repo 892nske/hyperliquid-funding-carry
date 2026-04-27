@@ -18,8 +18,12 @@ strategy:
   exit:
     basis_exit: 0.0003
     basis_stop: 0.0035
-    max_hold_hours: 2
     predicted_funding_decay_ratio: 0.5
+  timing:
+    funding_interval_minutes: 60
+    entry_lead_minutes: 60
+    min_hold_minutes_after_funding: 60
+    max_hold_minutes: 120
   risk:
     max_notional_pct: 0.15
     max_positions: 1
@@ -31,3 +35,5 @@ execution:
 research:
   save_features: true
   save_trades: true
+artifacts:
+  root_dir: artifacts
