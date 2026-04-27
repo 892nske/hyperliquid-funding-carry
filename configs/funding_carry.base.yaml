@@ -1,7 +1,14 @@
+data:
+  candles_path: data/raw/sample_candles.csv
+  asset_context_path: data/raw/sample_asset_context.csv
+  funding_path: data/raw/sample_funding.csv
 strategy:
   name: funding_carry
   symbols: [BTC, ETH, HYPE]
-  timeframe: 1h
+  signal_timeframe: 1h
+  execution_timeframe: 5m
+  mode: spot_perp
+  min_signal_interval_hours: 1
   entry:
     predicted_funding_min: 0.00015
     current_funding_min: 0.00010

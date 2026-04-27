@@ -1,18 +1,42 @@
+from __future__ import annotations
+
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
+from hl_funding_carry.settings import CONFIG_DIR
+
 
 @pytest.fixture
-def funding_input() -> pd.DataFrame:
+def sample_dataset() -> pd.DataFrame:
+    timestamps = pd.date_range("2026-01-01", periods=30, freq="1h", tz="UTC")
+    open_prices = [100.0 + 0.02 * index for index in range(30)]
+    close_prices = [price + 0.05 for price in open_prices]
+    mark_prices = [price + 0.20 for price in open_prices]
+    oracle_prices = [price for price in open_prices]
+    spot_prices = [price + 0.01 for price in open_prices]
+    predicted = [0.00020] * 26 + [0.00005] * 4
+
     return pd.DataFrame(
         {
-            "ts": pd.date_range("2026-01-01", periods=30, freq="1h", tz="UTC"),
+            "timestamp": timestamps,
             "symbol": ["BTC"] * 30,
+            "open": open_prices,
+            "high": [price + 0.15 for price in open_prices],
+            "low": [price - 0.10 for price in open_prices],
+            "close": close_prices,
+            "mark_price": mark_prices,
+            "oracle_price": oracle_prices,
             "current_funding": [0.00012] * 30,
-            "predicted_funding": [0.00018] * 30,
-            "mark_price": [100.2] * 30,
-            "oracle_price": [100.0] * 30,
-            "open_interest": [1000 + i for i in range(30)],
+            "pred_funding_1h": predicted,
+            "open_interest": [1000.0 + 5.0 * index for index in range(30)],
             "spread_bps": [2.0] * 30,
-        }
+            "spot_price": spot_prices,
+        },
     )
+
+
+@pytest.fixture
+def config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.base.yaml"

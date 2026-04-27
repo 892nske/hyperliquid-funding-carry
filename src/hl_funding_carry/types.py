@@ -1,13 +1,45 @@
-from dataclasses import dataclass
-from datetime import datetime
+from __future__ import annotations
 
+from typing import Final
 
-@dataclass(frozen=True)
-class FundingObservation:
-    ts: datetime
-    symbol: str
-    current_funding: float
-    predicted_funding: float
-    mark_price: float
-    oracle_price: float
-    open_interest: float
+CANDLE_COLUMNS: Final[tuple[str, ...]] = (
+    "timestamp",
+    "symbol",
+    "open",
+    "high",
+    "low",
+    "close",
+)
+
+ASSET_CONTEXT_COLUMNS: Final[tuple[str, ...]] = (
+    "timestamp",
+    "symbol",
+    "mark_price",
+    "oracle_price",
+    "current_funding",
+    "open_interest",
+    "spread_bps",
+    "spot_price",
+)
+
+FUNDING_COLUMNS: Final[tuple[str, ...]] = (
+    "timestamp",
+    "symbol",
+    "pred_funding_1h",
+)
+
+RESEARCH_COLUMNS: Final[tuple[str, ...]] = (
+    "timestamp",
+    "symbol",
+    "open",
+    "high",
+    "low",
+    "close",
+    "mark_price",
+    "oracle_price",
+    "current_funding",
+    "pred_funding_1h",
+    "open_interest",
+    "spread_bps",
+    "spot_price",
+)

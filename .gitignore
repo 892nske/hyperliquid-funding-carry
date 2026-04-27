@@ -16,6 +16,7 @@ build/
 /data/features/*
 /data/backtests/*
 !/data/raw/.gitkeep
+!/data/raw/sample_*.csv
 !/data/interim/.gitkeep
 !/data/features/.gitkeep
 !/data/backtests/.gitkeep

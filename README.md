@@ -27,6 +27,15 @@ uv run ruff check .
 uv run mypy src
 ```
 
+## Minimal backtest
+Run the sample end-to-end funding carry backtest with:
+
+```bash
+uv run python -m hl_funding_carry --config configs/funding_carry.base.yaml
+```
+
+The base config points at sample CSV files under `data/raw/`.
+
 ## Proposed package layout
 See [`docs/project_structure.md`](docs/project_structure.md).
 
