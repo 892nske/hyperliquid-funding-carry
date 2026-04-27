@@ -1,0 +1,14 @@
+source: hyperliquid
+symbol: BTC
+start: 2026-01-01T00:00:00Z
+end: 2026-01-02T05:00:00Z
+candle_interval: 1h
+include_predicted_funding: true
+raw_output_dir: data/raw/real
+processed_output_dir: data/processed
+hyperliquid:
+  mode: local_dump
+  candles_path: data/raw/hyperliquid_fixture/btc_candles.json
+  asset_context_path: data/raw/hyperliquid_fixture/btc_asset_context.json
+  funding_history_path: data/raw/hyperliquid_fixture/btc_funding_history.json
+  predicted_funding_path: data/raw/hyperliquid_fixture/btc_predicted_funding.json

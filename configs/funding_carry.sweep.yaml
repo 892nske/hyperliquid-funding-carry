@@ -10,3 +10,11 @@ entry_lead_minutes:
 max_hold_minutes:
   - 120
   - 180
+execution_model:
+  - next_open
+  - twap_5m
+  - vwap_1m
+execution_slippage_bps:
+  - 1.0
+execution_fee_bps:
+  - 4.5

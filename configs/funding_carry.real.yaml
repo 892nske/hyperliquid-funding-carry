@@ -1,13 +1,9 @@
 data:
-  source: local_files
-  candles_path: data/raw/sample_candles.csv
-  asset_context_path: data/raw/sample_asset_context.csv
-  funding_path: data/raw/sample_funding.csv
-  execution_5m_path: data/raw/sample_execution_5m.csv
-  execution_1m_path: data/raw/sample_execution_1m.csv
+  source: processed_dir
+  processed_dir: data/processed/hyperliquid/BTC/20260101T000000Z_20260102T050000Z
 strategy:
   name: funding_carry
-  symbols: [BTC, ETH, HYPE]
+  symbols: [BTC]
   signal_timeframe: 1h
   execution_timeframe: 5m
   mode: spot_perp

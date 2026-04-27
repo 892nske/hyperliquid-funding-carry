@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,9 +16,13 @@ ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 class DataConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    source: Literal["local_files", "processed_dir"] = "local_files"
     candles_path: Path = DATA_DIR / "raw" / "sample_candles.csv"
     asset_context_path: Path = DATA_DIR / "raw" / "sample_asset_context.csv"
     funding_path: Path = DATA_DIR / "raw" / "sample_funding.csv"
+    execution_5m_path: Path | None = DATA_DIR / "raw" / "sample_execution_5m.csv"
+    execution_1m_path: Path | None = DATA_DIR / "raw" / "sample_execution_1m.csv"
+    processed_dir: Path | None = None
 
 
 class StrategyEntryConfig(BaseModel):
@@ -78,10 +83,16 @@ class StrategyConfig(BaseModel):
 class ExecutionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["bar_close"] = "bar_close"
-    fee_bps_maker: float
-    fee_bps_taker: float
-    slippage_bps: float
+    model: Literal["next_open", "twap_5m", "vwap_1m"] = Field(
+        default="next_open",
+        validation_alias=AliasChoices("model", "mode"),
+    )
+    fee_bps: float = Field(default=4.5, validation_alias=AliasChoices("fee_bps", "fee_bps_taker"))
+    fee_bps_maker: float | None = None
+    slippage_bps: float = 1.0
+    timing_drag_bps: float = 0.0
+    twap_window_minutes: int = 5
+    vwap_window_minutes: int = 5
 
 
 class ResearchConfig(BaseModel):
@@ -97,6 +108,16 @@ class ArtifactConfig(BaseModel):
     root_dir: Path = ARTIFACTS_DIR
 
 
+class WalkForwardConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    train_window: str = "7D"
+    test_window: str = "3D"
+    step_size: str = "3D"
+    selection_metric: Literal["total_return", "sharpe_like"] = "total_return"
+
+
 class FundingCarryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -105,6 +126,8 @@ class FundingCarryConfig(BaseModel):
     execution: ExecutionConfig
     research: ResearchConfig = ResearchConfig()
     artifacts: ArtifactConfig = ArtifactConfig()
+    walkforward: WalkForwardConfig | None = None
+    sweep_grid: SweepGridConfig | None = None
 
 
 class SweepGridConfig(BaseModel):
@@ -114,6 +137,36 @@ class SweepGridConfig(BaseModel):
     basis_entry: list[float]
     entry_lead_minutes: list[int]
     max_hold_minutes: list[int]
+    execution_model: list[Literal["next_open", "twap_5m", "vwap_1m"]] = ["next_open"]
+    execution_slippage_bps: list[float] = [1.0]
+    execution_fee_bps: list[float] = [4.5]
+
+
+class HyperliquidTransportConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["local_dump", "api"] = "local_dump"
+    api_url: str = "https://api.hyperliquid.xyz/info"
+    candles_path: Path | None = None
+    asset_context_path: Path | None = None
+    funding_history_path: Path | None = None
+    predicted_funding_path: Path | None = None
+
+
+class IngestConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["hyperliquid"] = "hyperliquid"
+    symbol: str
+    start: datetime
+    end: datetime
+    candle_interval: str = "1h"
+    include_predicted_funding: bool = True
+    raw_output_dir: Path = DATA_DIR / "raw" / "real"
+    processed_output_dir: Path = DATA_DIR / "processed"
+    execution_5m_path: Path | None = None
+    execution_1m_path: Path | None = None
+    hyperliquid: HyperliquidTransportConfig = HyperliquidTransportConfig()
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -130,3 +183,10 @@ def load_config(path: Path) -> FundingCarryConfig:
 
 def load_sweep_grid(path: Path) -> SweepGridConfig:
     return SweepGridConfig.model_validate(_load_yaml(path))
+
+
+def load_ingest_config(path: Path) -> IngestConfig:
+    return IngestConfig.model_validate(_load_yaml(path))
+
+
+FundingCarryConfig.model_rebuild()

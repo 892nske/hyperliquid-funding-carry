@@ -32,6 +32,22 @@ FUNDING_COLUMNS: Final[tuple[str, ...]] = (
     "pred_funding_1h",
 )
 
+INTRABAR_COLUMNS: Final[tuple[str, ...]] = (
+    "timestamp",
+    "symbol",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+)
+
+FUNDING_HISTORY_COLUMNS: Final[tuple[str, ...]] = (
+    "timestamp",
+    "symbol",
+    "funding_rate",
+)
+
 RESEARCH_COLUMNS: Final[tuple[str, ...]] = (
     "timestamp",
     "symbol",
@@ -56,4 +72,27 @@ class BacktestResult:
     ledger: pd.DataFrame
     trades: pd.DataFrame
     equity_curve: pd.DataFrame
+    pnl_attribution: pd.DataFrame
+    execution_summary: pd.DataFrame
+    trade_attribution: pd.DataFrame
     artifact_dir: Path | None = None
+
+
+@dataclass(frozen=True)
+class FillResult:
+    fill_price: float
+    benchmark_price: float
+    fallback: str
+
+
+@dataclass(frozen=True)
+class ValidationReport:
+    dataset: str
+    row_count: int
+    missing_ratio: float
+    duplicate_count: int
+    non_monotonic_count: int
+    gap_count: int
+    max_gap_minutes: float
+    min_timestamp: pd.Timestamp | None
+    max_timestamp: pd.Timestamp | None

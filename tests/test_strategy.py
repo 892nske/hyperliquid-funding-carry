@@ -11,6 +11,7 @@ def test_load_config_reads_base_yaml(config_path):
     assert config.strategy.name == "funding_carry"
     assert config.strategy.signal_timeframe == "1h"
     assert config.strategy.timing.entry_lead_minutes == 60
+    assert config.execution.model == "next_open"
     assert config.execution.slippage_bps == 1.0
 
 
@@ -62,4 +63,5 @@ def test_end_to_end_backtest_runs_on_sample_data(config_path):
         "trade_count",
         "average_holding_period",
         "run_id",
+        "execution_model",
     }

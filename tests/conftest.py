@@ -62,5 +62,30 @@ def sample_dataset_15m() -> pd.DataFrame:
 
 
 @pytest.fixture
+def sample_execution_5m() -> pd.DataFrame:
+    return pd.read_csv(CONFIG_DIR.parent / "data" / "raw" / "sample_execution_5m.csv")
+
+
+@pytest.fixture
+def sample_execution_1m() -> pd.DataFrame:
+    return pd.read_csv(CONFIG_DIR.parent / "data" / "raw" / "sample_execution_1m.csv")
+
+
+@pytest.fixture
 def config_path() -> Path:
     return CONFIG_DIR / "funding_carry.base.yaml"
+
+
+@pytest.fixture
+def ingest_config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.ingest.yaml"
+
+
+@pytest.fixture
+def real_config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.real.yaml"
+
+
+@pytest.fixture
+def walkforward_config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.walkforward.yaml"
