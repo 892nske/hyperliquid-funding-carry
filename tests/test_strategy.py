@@ -56,7 +56,7 @@ def test_end_to_end_backtest_runs_on_sample_data(config_path):
     assert {"next_funding_time", "is_funding_event", "target_position"}.issubset(targets.columns)
 
     result = run_backtest(config, save_artifacts=False)
-    assert set(result.summary) == {
+    assert {
         "total_return",
         "sharpe_like",
         "max_drawdown",
@@ -64,4 +64,4 @@ def test_end_to_end_backtest_runs_on_sample_data(config_path):
         "average_holding_period",
         "run_id",
         "execution_model",
-    }
+    }.issubset(result.summary)

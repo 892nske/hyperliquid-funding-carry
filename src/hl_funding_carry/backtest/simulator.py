@@ -85,18 +85,18 @@ def _build_trade_log(ledger: pd.DataFrame) -> pd.DataFrame:
 
 def _build_equity_curve(ledger: pd.DataFrame) -> pd.DataFrame:
     equity_curve = (
-        ledger.groupby("timestamp", as_index=False)[
-            [
-                "price_pnl_spot",
-                "price_pnl_perp",
-                "funding_pnl",
-                "fee",
-                "slippage",
-                "timing_drag",
-                "total_pnl",
-            ]
-        ]
-        .sum()
+        ledger.groupby("timestamp", as_index=False)
+        .agg(
+            price_pnl_spot=("price_pnl_spot", "sum"),
+            price_pnl_perp=("price_pnl_perp", "sum"),
+            funding_pnl=("funding_pnl", "sum"),
+            fee=("fee", "sum"),
+            slippage=("slippage", "sum"),
+            timing_drag=("timing_drag", "sum"),
+            total_pnl=("total_pnl", "sum"),
+            gross_exposure=("gross_exposure", "max"),
+            active_symbol_count=("active_symbol_count", "max"),
+        )
         .sort_values("timestamp")
         .reset_index(drop=True)
     )
@@ -207,7 +207,6 @@ def simulate_backtest(
         frame.loc[event_mask, "funding_pnl"] = (
             -frame.loc[event_mask, "position_perp"] * frame.loc[event_mask, "current_funding"]
         )
-
         frame["fee"] = frame["spot_fee"] + frame["perp_fee"]
         frame["slippage"] = frame["spot_slippage"] + frame["perp_slippage"]
         frame["timing_drag"] = frame["timing_drag_spot"] + frame["timing_drag_perp"]
@@ -232,10 +231,19 @@ def simulate_backtest(
     summary: dict[str, float | str] = {key: value for key, value in summary_values.items()}
     summary["run_id"] = run_id
     summary["execution_model"] = config.execution.model
-    pnl_attribution, execution_summary, trade_attribution = build_attribution_tables(
+    summary["symbol_count"] = float(ledger["symbol"].nunique())
+    summary["mean_gross_exposure"] = float(ledger["gross_exposure"].mean())
+    (
+        pnl_attribution,
+        execution_summary,
+        trade_attribution,
+        portfolio_summary,
+        symbol_summary,
+    ) = build_attribution_tables(
         run_id,
         ledger,
         trades,
+        summary,
     )
     return BacktestResult(
         run_id=run_id,
@@ -246,4 +254,6 @@ def simulate_backtest(
         pnl_attribution=pnl_attribution,
         execution_summary=execution_summary,
         trade_attribution=trade_attribution,
+        portfolio_summary=portfolio_summary,
+        symbol_summary=symbol_summary,
     )

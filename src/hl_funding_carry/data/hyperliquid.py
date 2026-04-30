@@ -47,26 +47,109 @@ def _post_info(api_url: str, payload: dict[str, object]) -> pd.DataFrame:
     raise ValueError("Unexpected Hyperliquid API response")
 
 
-def fetch_hyperliquid_raw(config: IngestConfig) -> dict[str, pd.DataFrame]:
+def _resolve_symbol_fixture(
+    base_dir: Path,
+    symbol: str,
+    stem: str,
+    suffixes: tuple[str, ...],
+) -> Path | None:
+    for suffix in suffixes:
+        candidate = base_dir / f"{symbol.lower()}_{stem}{suffix}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _local_dump_path(
+    configured_path: Path | None,
+    base_dir: Path | None,
+    symbol: str,
+    stem: str,
+) -> Path | None:
+    if configured_path is not None:
+        return configured_path
+    if base_dir is None:
+        return None
+    suffixes = (".csv", ".parquet", ".json")
+    return _resolve_symbol_fixture(base_dir, symbol, stem, suffixes)
+
+
+def fetch_hyperliquid_raw(
+    config: IngestConfig,
+    symbol: str | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+) -> dict[str, pd.DataFrame]:
+    target_symbol = (symbol or config.symbol or "").upper()
+    if not target_symbol:
+        raise ValueError("symbol is required for Hyperliquid raw fetch")
     transport = config.hyperliquid
     if transport.mode == "local_dump":
         return {
-            "candles_raw": _load_payload(transport.candles_path),
-            "asset_context_raw": _load_payload(transport.asset_context_path),
-            "funding_history_raw": _load_payload(transport.funding_history_path),
-            "predicted_funding_raw": _load_payload(transport.predicted_funding_path)
+            "candles_raw": _load_payload(
+                _local_dump_path(
+                    transport.candles_path,
+                    transport.base_dir,
+                    target_symbol,
+                    "candles",
+                ),
+            ),
+            "asset_context_raw": _load_payload(
+                _local_dump_path(
+                    transport.asset_context_path,
+                    transport.base_dir,
+                    target_symbol,
+                    "asset_context",
+                ),
+            ),
+            "funding_history_raw": _load_payload(
+                _local_dump_path(
+                    transport.funding_history_path,
+                    transport.base_dir,
+                    target_symbol,
+                    "funding_history",
+                ),
+            ),
+            "predicted_funding_raw": _load_payload(
+                _local_dump_path(
+                    transport.predicted_funding_path,
+                    transport.base_dir,
+                    target_symbol,
+                    "predicted_funding",
+                ),
+            )
             if config.include_predicted_funding
+            else pd.DataFrame(),
+            "execution_5m_raw": _load_payload(
+                _local_dump_path(
+                    transport.execution_5m_path,
+                    transport.base_dir,
+                    target_symbol,
+                    "execution_5m",
+                ),
+            )
+            if "5m" in config.execution_intervals
+            else pd.DataFrame(),
+            "execution_1m_raw": _load_payload(
+                _local_dump_path(
+                    transport.execution_1m_path,
+                    transport.base_dir,
+                    target_symbol,
+                    "execution_1m",
+                ),
+            )
+            if "1m" in config.execution_intervals
             else pd.DataFrame(),
         }
 
-    start_ms = int(pd.Timestamp(config.start, tz="UTC").timestamp() * 1000)
-    end_ms = int(pd.Timestamp(config.end, tz="UTC").timestamp() * 1000)
+    start_ms = int((start or pd.Timestamp(config.start, tz="UTC")).timestamp() * 1000)
+    end_ms = int((end or pd.Timestamp(config.end, tz="UTC")).timestamp() * 1000)
     candles = _post_info(
         transport.api_url,
         {
             "type": "candleSnapshot",
             "req": {
-                "coin": config.symbol,
+                "coin": target_symbol,
                 "interval": config.candle_interval,
                 "startTime": start_ms,
                 "endTime": end_ms,
@@ -77,23 +160,43 @@ def fetch_hyperliquid_raw(config: IngestConfig) -> dict[str, pd.DataFrame]:
         transport.api_url,
         {
             "type": "fundingHistory",
-            "coin": config.symbol,
+            "coin": target_symbol,
             "startTime": start_ms,
             "endTime": end_ms,
         },
     )
+    execution_frames: dict[str, pd.DataFrame] = {}
+    for interval in config.execution_intervals:
+        execution_frames[f"execution_{interval}_raw"] = _post_info(
+            transport.api_url,
+            {
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": target_symbol,
+                    "interval": interval,
+                    "startTime": start_ms,
+                    "endTime": end_ms,
+                },
+            },
+        )
     predicted_funding = pd.DataFrame()
     if config.include_predicted_funding:
-        predicted_funding = _post_info(
-            transport.api_url,
-            {"type": "predictedFundings"},
-        )
-    asset_context = _load_payload(transport.asset_context_path)
+        predicted_funding = _post_info(transport.api_url, {"type": "predictedFundings"})
+    asset_context = _load_payload(
+        _local_dump_path(
+            transport.asset_context_path,
+            transport.base_dir,
+            target_symbol,
+            "asset_context",
+        ),
+    )
     return {
         "candles_raw": candles,
         "asset_context_raw": asset_context,
         "funding_history_raw": funding_history,
         "predicted_funding_raw": predicted_funding,
+        "execution_5m_raw": execution_frames.get("execution_5m_raw", pd.DataFrame()),
+        "execution_1m_raw": execution_frames.get("execution_1m_raw", pd.DataFrame()),
     }
 
 
@@ -115,7 +218,11 @@ def _optional_column(
     return pd.Series(default, index=df.index, dtype="float64")
 
 
-def normalize_hyperliquid_candles(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
+def normalize_hyperliquid_candles(
+    raw: pd.DataFrame,
+    symbol: str,
+    floor_to: str = "1h",
+) -> pd.DataFrame:
     if raw.empty:
         raise ValueError("Hyperliquid candles payload is empty")
     normalized = pd.DataFrame(
@@ -123,12 +230,13 @@ def normalize_hyperliquid_candles(raw: pd.DataFrame, symbol: str) -> pd.DataFram
             "timestamp": pd.to_datetime(
                 _pick_column(raw, ("timestamp", "time", "t"), "timestamp"),
                 utc=True,
-            ).dt.floor("1h"),
+            ).dt.floor(floor_to),
             "symbol": symbol,
             "open": pd.to_numeric(_pick_column(raw, ("open", "o"), "open"), errors="coerce"),
             "high": pd.to_numeric(_pick_column(raw, ("high", "h"), "high"), errors="coerce"),
             "low": pd.to_numeric(_pick_column(raw, ("low", "l"), "low"), errors="coerce"),
             "close": pd.to_numeric(_pick_column(raw, ("close", "c"), "close"), errors="coerce"),
+            "volume": _optional_column(raw, ("volume", "v"), 0.0),
         },
     )
     return normalized.drop_duplicates(subset=["timestamp", "symbol"], keep="last").sort_values(

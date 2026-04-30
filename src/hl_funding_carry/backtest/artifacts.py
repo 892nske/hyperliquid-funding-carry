@@ -38,6 +38,8 @@ def save_backtest_artifacts(
     _save_dataframe(result.pnl_attribution, run_dir / "pnl_attribution.csv")
     _save_dataframe(result.execution_summary, run_dir / "execution_summary.csv")
     _save_dataframe(result.trade_attribution, run_dir / "trade_attribution.csv")
+    _save_dataframe(result.portfolio_summary, run_dir / "portfolio_summary.csv")
+    _save_dataframe(result.symbol_summary, run_dir / "symbol_summary.csv")
     with (run_dir / "params.json").open("w", encoding="utf-8") as handle:
         json.dump(config.model_dump(mode="json"), handle, indent=2)
     return run_dir
@@ -62,6 +64,9 @@ def save_walkforward_artifacts(
     fold_results: pd.DataFrame,
     selected_params: pd.DataFrame,
     validation_summary: pd.DataFrame,
+    fold_attribution: pd.DataFrame,
+    symbol_attribution: pd.DataFrame,
+    execution_model_attribution: pd.DataFrame,
     output_dir: Path,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +74,12 @@ def save_walkforward_artifacts(
     _save_dataframe(fold_results, output_dir / "fold_results.csv")
     _save_dataframe(selected_params, output_dir / "selected_params.csv")
     _save_dataframe(validation_summary, output_dir / "data_validation_summary.csv")
+    _save_dataframe(fold_attribution, output_dir / "fold_attribution.csv")
+    _save_dataframe(symbol_attribution, output_dir / "symbol_attribution.csv")
+    _save_dataframe(
+        execution_model_attribution,
+        output_dir / "execution_model_attribution.csv",
+    )
 
 
 def regenerate_report(input_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -80,12 +91,31 @@ def regenerate_report(input_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.D
     run_id = "report"
     if "run_id" in ledger.columns and not ledger.empty:
         run_id = str(ledger["run_id"].iloc[0])
-    pnl_attribution, execution_summary, trade_attribution = build_attribution_tables(
+    (
+        pnl_attribution,
+        execution_summary,
+        trade_attribution,
+        portfolio_summary,
+        symbol_summary,
+    ) = build_attribution_tables(
         run_id,
         ledger,
         trades,
+        {
+            "run_id": run_id,
+            "execution_model": str(ledger["execution_model"].iloc[0]) if not ledger.empty else "",
+            "total_return": float(ledger["total_pnl"].sum()),
+            "sharpe_like": 0.0,
+            "max_drawdown": 0.0,
+            "trade_count": float(len(trades)),
+            "average_holding_period": (
+                float(trades["holding_minutes"].mean()) if not trades.empty else 0.0
+            ),
+        },
     )
     _save_dataframe(pnl_attribution, input_dir / "pnl_attribution.csv")
     _save_dataframe(execution_summary, input_dir / "execution_summary.csv")
     _save_dataframe(trade_attribution, input_dir / "trade_attribution.csv")
+    _save_dataframe(portfolio_summary, input_dir / "portfolio_summary.csv")
+    _save_dataframe(symbol_summary, input_dir / "symbol_summary.csv")
     return pnl_attribution, execution_summary, trade_attribution

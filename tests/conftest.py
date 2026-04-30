@@ -89,3 +89,18 @@ def real_config_path() -> Path:
 @pytest.fixture
 def walkforward_config_path() -> Path:
     return CONFIG_DIR / "funding_carry.walkforward.yaml"
+
+
+@pytest.fixture
+def bulk_ingest_config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.bulk.yaml"
+
+
+@pytest.fixture
+def multi_config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.multi.yaml"
+
+
+@pytest.fixture
+def multi_walkforward_config_path() -> Path:
+    return CONFIG_DIR / "funding_carry.multi_walkforward.yaml"

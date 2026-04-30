@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from hl_funding_carry.data.ingestion import ingest_hyperliquid_batch
-from hl_funding_carry.data.loaders import load_processed_research_dataset
+from hl_funding_carry.data.ingestion import ingest_hyperliquid_batch, ingest_hyperliquid_bulk
+from hl_funding_carry.data.loaders import (
+    load_processed_execution_inputs,
+    load_processed_research_dataset,
+)
 from hl_funding_carry.data.validation import (
     summarize_validation_report,
     validate_processed_directory,
@@ -56,3 +59,31 @@ def test_validate_processed_directory_returns_summary(real_config_path):
     assert {"dataset", "row_count", "missing_ratio", "duplicate_count"}.issubset(
         summary_df.columns,
     )
+
+
+def test_bulk_ingest_handles_multiple_symbols_and_chunks(tmp_path, bulk_ingest_config_path):
+    ingest_config = load_ingest_config(bulk_ingest_config_path)
+    ingest_config.raw_output_dir = tmp_path / "raw"
+    ingest_config.processed_output_dir = tmp_path / "processed"
+    result = ingest_hyperliquid_bulk(ingest_config)
+
+    assert not result.batch_summary.empty
+    assert result.batch_summary["symbol"].nunique() == 3
+    assert len(result.batch_summary) == 6
+
+
+def test_processed_loader_reads_execution_inputs_from_recursive_root(multi_config_path):
+    from hl_funding_carry.settings import load_config
+
+    config = load_config(multi_config_path)
+    assert config.data.processed_dir is not None
+    dataset = load_processed_research_dataset(
+        config.data.processed_dir,
+        recursive=True,
+        symbols=config.strategy.symbols,
+    )
+    execution_inputs = load_processed_execution_inputs(config.data.processed_dir, recursive=True)
+
+    assert dataset["symbol"].nunique() == 2
+    assert "1m" in execution_inputs
+    assert "5m" in execution_inputs

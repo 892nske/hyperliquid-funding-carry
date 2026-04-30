@@ -171,6 +171,19 @@ def _score_run(summary: dict[str, float | str], metric: str) -> float:
     return float(value)
 
 
+def _build_fold_tables(
+    fold_id: str,
+    result: BacktestResult,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    fold_attribution = result.portfolio_summary.copy()
+    fold_attribution["fold_id"] = fold_id
+    symbol_attribution = result.symbol_summary.copy()
+    symbol_attribution["fold_id"] = fold_id
+    execution_model_attribution = result.execution_summary.copy()
+    execution_model_attribution["fold_id"] = fold_id
+    return fold_attribution, symbol_attribution, execution_model_attribution
+
+
 def run_walkforward(
     config: FundingCarryConfig,
     output_dir: Path | None = None,
@@ -199,6 +212,9 @@ def run_walkforward(
     fold_index = 1
     selected_params: list[dict[str, Any]] = []
     fold_results: list[dict[str, Any]] = []
+    fold_attr_frames: list[pd.DataFrame] = []
+    symbol_attr_frames: list[pd.DataFrame] = []
+    execution_attr_frames: list[pd.DataFrame] = []
 
     while current_start + train_window + test_window <= max_timestamp + pd.Timedelta(seconds=1):
         train_start = current_start
@@ -261,17 +277,18 @@ def run_walkforward(
             current_start += step_size
             continue
 
+        fold_id = f"fold_{fold_index:03d}"
         test_result = _run_backtest_on_dataset(
             best_config,
             test_dataset,
             execution_inputs,
-            run_id=f"fold_{fold_index:03d}_test",
+            run_id=f"{fold_id}_test",
         )
         fold_run_dir = save_backtest_artifacts(test_result, best_config, folds_dir)
         test_result.artifact_dir = fold_run_dir
         selected_params.append(
             {
-                "fold_id": f"fold_{fold_index:03d}",
+                "fold_id": fold_id,
                 "train_start": train_start,
                 "train_end": train_end,
                 "test_start": test_start,
@@ -282,7 +299,7 @@ def run_walkforward(
         )
         fold_results.append(
             {
-                "fold_id": f"fold_{fold_index:03d}",
+                "fold_id": fold_id,
                 "train_start": train_start,
                 "train_end": train_end,
                 "test_start": test_start,
@@ -292,6 +309,10 @@ def run_walkforward(
                 **test_result.summary,
             },
         )
+        fold_attr, symbol_attr, execution_attr = _build_fold_tables(fold_id, test_result)
+        fold_attr_frames.append(fold_attr)
+        symbol_attr_frames.append(symbol_attr)
+        execution_attr_frames.append(execution_attr)
         current_start += step_size
         fold_index += 1
 
@@ -309,6 +330,7 @@ def run_walkforward(
                 else 0.0,
                 "selection_metric": selection_metric,
                 "data_source": config.data.source,
+                "symbol_count": float(dataset["symbol"].nunique()),
             },
         ],
     )
@@ -317,11 +339,27 @@ def run_walkforward(
         if config.data.source == "processed_dir" and config.data.processed_dir is not None
         else pd.DataFrame()
     )
+    fold_attribution_df = (
+        pd.concat(fold_attr_frames, ignore_index=True) if fold_attr_frames else pd.DataFrame()
+    )
+    symbol_attribution_df = (
+        pd.concat(symbol_attr_frames, ignore_index=True)
+        if symbol_attr_frames
+        else pd.DataFrame()
+    )
+    execution_model_attribution_df = (
+        pd.concat(execution_attr_frames, ignore_index=True)
+        if execution_attr_frames
+        else pd.DataFrame()
+    )
     save_walkforward_artifacts(
         walkforward_summary=walkforward_summary,
         fold_results=fold_results_df,
         selected_params=selected_params_df,
         validation_summary=validation_summary,
+        fold_attribution=fold_attribution_df,
+        symbol_attribution=symbol_attribution_df,
+        execution_model_attribution=execution_model_attribution_df,
         output_dir=fold_root,
     )
     return fold_results_df

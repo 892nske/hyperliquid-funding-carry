@@ -1,0 +1,72 @@
+data:
+  source: processed_dir
+  processed_dir: data/processed/hyperliquid
+  processed_recursive: true
+strategy:
+  name: funding_carry
+  symbols: [BTC, ETH]
+  signal_timeframe: 1h
+  execution_timeframe: 5m
+  mode: spot_perp
+  min_signal_interval_hours: 1
+  entry:
+    predicted_funding_min: 0.00015
+    current_funding_min: 0.00010
+    basis_min: 0.0010
+    oi_change_1h_min: 0.0
+    spread_bps_max: 4.0
+  exit:
+    basis_exit: 0.0003
+    basis_stop: 0.0035
+    predicted_funding_decay_ratio: 0.5
+  timing:
+    funding_interval_minutes: 60
+    entry_lead_minutes: 60
+    min_hold_minutes_after_funding: 60
+    max_hold_minutes: 120
+  risk:
+    max_notional_pct: 0.12
+    allocation_mode: equal_weight
+    max_gross_exposure: 0.24
+    max_notional_per_symbol: 0.12
+    max_active_symbols: 2
+    top_n_signals: 2
+execution:
+  model: next_open
+  fee_bps: 4.5
+  fee_bps_maker: 1.5
+  slippage_bps: 1.0
+  timing_drag_bps: 0.0
+  twap_window_minutes: 5
+  vwap_window_minutes: 5
+research:
+  save_features: true
+  save_trades: true
+artifacts:
+  root_dir: artifacts
+walkforward:
+  enabled: true
+  train_window: 12h
+  test_window: 6h
+  step_size: 6h
+  selection_metric: total_return
+sweep_grid:
+  pred_funding_entry:
+    - 0.00015
+    - 0.00018
+  basis_entry:
+    - 0.0010
+    - 0.0015
+  entry_lead_minutes:
+    - 60
+    - 30
+  max_hold_minutes:
+    - 120
+  execution_model:
+    - next_open
+    - twap_5m
+    - vwap_1m
+  execution_slippage_bps:
+    - 1.0
+  execution_fee_bps:
+    - 4.5

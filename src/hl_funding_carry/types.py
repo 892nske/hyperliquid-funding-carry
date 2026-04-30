@@ -75,6 +75,8 @@ class BacktestResult:
     pnl_attribution: pd.DataFrame
     execution_summary: pd.DataFrame
     trade_attribution: pd.DataFrame
+    portfolio_summary: pd.DataFrame
+    symbol_summary: pd.DataFrame
     artifact_dir: Path | None = None
 
 
@@ -89,6 +91,7 @@ class FillResult:
 class ValidationReport:
     dataset: str
     row_count: int
+    symbol_count: int
     missing_ratio: float
     duplicate_count: int
     non_monotonic_count: int

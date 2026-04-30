@@ -40,6 +40,13 @@ uv run mypy src
 - walk-forward runner with fold artifacts and selected parameter tracking
 - raw / processed data layout for reproducible offline experiments
 
+## Week5 improvements
+- bulk ingestion for multiple symbols and chunked date ranges
+- multi-symbol processed real-data loading with optional execution inputs
+- portfolio-level allocation and simple gross exposure / active symbol constraints
+- walk-forward fold attribution tables for portfolio, symbol, and execution model views
+- real-data execution comparison support using processed `execution_1m` / `execution_5m`
+
 ## Week2 improvements
 - explicit hourly funding event timing in UTC
 - 2-leg spot/perp ledger with separated PnL decomposition
@@ -98,6 +105,24 @@ Run a walk-forward study with:
 uv run python -m hl_funding_carry walkforward --config configs/funding_carry.walkforward.yaml
 ```
 
+Run bulk ingestion for multiple symbols and 12h chunks with:
+
+```bash
+uv run python -m hl_funding_carry ingest --config configs/funding_carry.bulk.yaml
+```
+
+Run a multi-symbol backtest from processed real-data leaves with:
+
+```bash
+uv run python -m hl_funding_carry backtest --config configs/funding_carry.multi.yaml
+```
+
+Run a multi-symbol walk-forward study with:
+
+```bash
+uv run python -m hl_funding_carry walkforward --config configs/funding_carry.multi_walkforward.yaml
+```
+
 ## Artifacts
 Backtest and sweep outputs are saved under `artifacts/` by default.
 
@@ -119,8 +144,15 @@ Walk-forward output includes:
 - `walkforward_summary.csv`
 - `fold_results.csv`
 - `selected_params.csv`
+- `fold_attribution.csv`
+- `symbol_attribution.csv`
+- `execution_model_attribution.csv`
 - `data_validation_summary.csv`
 - per-fold backtest artifact directories under `folds/`
+
+Backtest output now also includes:
+- `portfolio_summary.csv`
+- `symbol_summary.csv`
 
 Processed real-data directories also save:
 - `candles.parquet` or `.csv`
@@ -158,6 +190,8 @@ data/
 
 `sample` configs keep using `data/raw/sample_*.csv`. `real` configs point at a processed directory and reuse the same backtest schema.
 
+`multi` configs point at a processed root and enable recursive loading across symbol/span leaf directories.
+
 ## Data validation
 `validate-data` and `ingest` emit a `data_validation_summary.csv` with:
 - `row_count`
@@ -171,22 +205,48 @@ data/
 
 This is a lightweight research quality check, not a full vendor reconciliation report.
 
+## Bulk ingestion
+`configs/funding_carry.bulk.yaml` demonstrates:
+- `symbols: [BTC, ETH, HYPE]`
+- `chunk_size: 12h`
+- execution helper ingestion for `1m` and `5m`
+
+Bulk ingestion preserves the week4 split:
+- fetch
+- normalize
+- validate
+- save
+
+Each `symbol x chunk` batch is saved to its own raw and processed leaf directory, and a top-level `ingestion_summary.csv` plus `data_validation_summary.csv` are saved under `data/processed/<source>/_bulk/<timestamp>/`.
+
 ## Execution model assumptions
 - `next_open`: current ledger row timestamp at the next signal bar is the benchmark execution price
 - `twap_5m`: 5m intrabar typical price average over the post-entry execution window; if unavailable, 1m proxy, then `next_open`
 - `vwap_1m`: 1m close-volume weighted average over the post-entry execution window; if volume is unusable, TWAP fallback
 - `timing_drag` is tracked separately from `slippage` as the deviation from the `next_open` benchmark implied by the execution model
+- processed real-data runs prefer saved `execution_1m` / `execution_5m` files over sample proxies
 
 ## Attribution outputs
 - `pnl_attribution.csv`: run / symbol / execution model level decomposition
 - `execution_summary.csv`: execution model level cost / fallback summary
 - `trade_attribution.csv`: per-trade decomposition for downstream analysis
+- `portfolio_summary.csv`: run-level portfolio totals and gross exposure summary
+- `symbol_summary.csv`: run x symbol totals
+- `fold_attribution.csv`: walk-forward fold-level totals
+- `symbol_attribution.csv`: walk-forward fold x symbol totals
+- `execution_model_attribution.csv`: walk-forward fold x execution-model cost summary
 
 ## Accounting assumptions
 - timestamps are treated as UTC internally
 - funding pnl is only accrued on explicit funding event timestamps
 - `spot_perp` mode records separate spot and perp legs for research
 - margin, borrowing, liquidation, and live execution are still out of scope
+
+## Multi-symbol allocation assumptions
+- `allocation_mode: equal_weight` allocates up to `max_gross_exposure / max_active_symbols` per active symbol, then applies the symbol size weight cap
+- `allocation_mode: fixed_notional` uses `fixed_notional_per_symbol` capped by `max_notional_per_symbol` and `max_gross_exposure`
+- `top_n_signals` can restrict entries to the highest carry-score names per timestamp
+- `max_active_symbols` and `max_gross_exposure` are simple research constraints, not a full portfolio optimizer
 
 ## Real-data ingestion assumptions
 - real-data ingestion is batch-oriented and offline-first
@@ -198,11 +258,14 @@ This is a lightweight research quality check, not a full vendor reconciliation r
 - walk-forward uses the existing strategy and execution stack unchanged
 - `train_window`, `test_window`, and `step_size` are configured as pandas-style durations such as `12h` or `7D`
 - train folds use simple grid search over the configured parameter set and select one metric, currently `total_return` or `sharpe_like`
+- fold-level attribution is aggregated from the saved test-fold ledgers and trade logs
 
 ## Known constraints
 - historical asset-context ingestion still depends on having a Hyperliquid-compatible dump or archive; the public API path alone is not enough for full historical reconstruction
 - execution intrabar data is optional in processed real-data runs; without it, `twap_5m` / `vwap_1m` fall back toward the week3 proxy logic
 - predicted funding support is optional and may be approximated with `current_funding` when only realized history is available
+- current portfolio constraints are deliberately simple and do not model correlation, margin offsets, or dynamic cash utilization
+- execution comparison on real data is still bar-proxy based; it is not trade-level or order-book-level simulation
 - this repository still does not implement live trading, order routing, authentication, or wallet signing
 
 ## Proposed package layout

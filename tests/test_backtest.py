@@ -57,3 +57,11 @@ def test_real_like_processed_fixture_backtest_runs(real_config_path, tmp_path):
     assert not result.ledger.empty
     assert "execution_model" in result.ledger.columns
     assert result.artifact_dir is not None
+
+
+def test_multi_symbol_constraints_apply(multi_config_path):
+    config = load_config(multi_config_path)
+    result = run_backtest(config, save_artifacts=False)
+
+    assert result.ledger["active_symbol_count"].max() <= config.strategy.risk.max_active_symbols
+    assert result.ledger["gross_exposure"].max() <= config.strategy.risk.max_gross_exposure + 1e-12

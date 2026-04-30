@@ -19,6 +19,7 @@ build/
 !/data/raw/sample_*.csv
 !/data/raw/hyperliquid_fixture/
 !/data/raw/hyperliquid_fixture/*.json
+!/data/raw/hyperliquid_fixture/*.csv
 !/data/interim/.gitkeep
 !/data/features/.gitkeep
 !/data/backtests/.gitkeep

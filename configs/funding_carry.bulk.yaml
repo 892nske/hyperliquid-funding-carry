@@ -1,0 +1,13 @@
+source: hyperliquid
+symbols: [BTC, ETH, HYPE]
+start: 2026-01-01T00:00:00Z
+end: 2026-01-02T00:00:00Z
+chunk_size: 12h
+candle_interval: 1h
+execution_intervals: [1m, 5m]
+include_predicted_funding: true
+raw_output_dir: data/raw/real
+processed_output_dir: data/processed
+hyperliquid:
+  mode: local_dump
+  base_dir: data/raw/hyperliquid_fixture

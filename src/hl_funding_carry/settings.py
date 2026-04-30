@@ -23,6 +23,7 @@ class DataConfig(BaseModel):
     execution_5m_path: Path | None = DATA_DIR / "raw" / "sample_execution_5m.csv"
     execution_1m_path: Path | None = DATA_DIR / "raw" / "sample_execution_1m.csv"
     processed_dir: Path | None = None
+    processed_recursive: bool = False
 
 
 class StrategyEntryConfig(BaseModel):
@@ -59,7 +60,19 @@ class StrategyRiskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_notional_pct: float
-    max_positions: int
+    allocation_mode: Literal["equal_weight", "fixed_notional"] = "equal_weight"
+    fixed_notional_per_symbol: float | None = None
+    max_gross_exposure: float = 0.15
+    max_notional_per_symbol: float | None = None
+    max_active_symbols: int = Field(
+        default=1,
+        validation_alias=AliasChoices("max_active_symbols", "max_positions"),
+    )
+    top_n_signals: int | None = None
+
+    @property
+    def max_positions(self) -> int:
+        return self.max_active_symbols
 
 
 class StrategyConfig(BaseModel):
@@ -147,20 +160,26 @@ class HyperliquidTransportConfig(BaseModel):
 
     mode: Literal["local_dump", "api"] = "local_dump"
     api_url: str = "https://api.hyperliquid.xyz/info"
+    base_dir: Path | None = None
     candles_path: Path | None = None
     asset_context_path: Path | None = None
     funding_history_path: Path | None = None
     predicted_funding_path: Path | None = None
+    execution_5m_path: Path | None = None
+    execution_1m_path: Path | None = None
 
 
 class IngestConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: Literal["hyperliquid"] = "hyperliquid"
-    symbol: str
+    symbol: str | None = None
+    symbols: list[str] | None = None
     start: datetime
     end: datetime
+    chunk_size: str | None = None
     candle_interval: str = "1h"
+    execution_intervals: list[Literal["1m", "5m"]] = ["1m", "5m"]
     include_predicted_funding: bool = True
     raw_output_dir: Path = DATA_DIR / "raw" / "real"
     processed_output_dir: Path = DATA_DIR / "processed"

@@ -104,107 +104,161 @@ class FundingCarryStrategy:
             return "exit_funding_decay"
         return None
 
+    def _base_symbol_budget(self, symbol: str) -> float:
+        risk = self.config.risk
+        max_active = max(1, risk.max_active_symbols)
+        per_symbol_cap = risk.max_notional_per_symbol
+        if per_symbol_cap is None:
+            per_symbol_cap = risk.max_notional_pct
+        if risk.allocation_mode == "fixed_notional":
+            fixed = risk.fixed_notional_per_symbol or min(
+                risk.max_notional_pct,
+                risk.max_gross_exposure / max_active,
+            )
+            return min(fixed, per_symbol_cap)
+        equal_weight_budget = risk.max_gross_exposure / max_active
+        weighted_budget = equal_weight_budget * SYMBOL_SIZE_WEIGHTS.get(symbol, 1.0)
+        return min(weighted_budget, risk.max_notional_pct, per_symbol_cap)
+
     def position_sizing(self, signal_df: pd.DataFrame) -> pd.DataFrame:
         sized = signal_df.copy()
-        sized["symbol_weight"] = sized["symbol"].map(SYMBOL_SIZE_WEIGHTS).fillna(0.0)
-        sized["target_size"] = sized["symbol_weight"] * self.config.risk.max_notional_pct
+        sized["symbol_weight"] = sized["symbol"].map(SYMBOL_SIZE_WEIGHTS).fillna(1.0)
+        sized["target_size"] = sized["symbol"].map(
+            lambda symbol: self._base_symbol_budget(str(symbol)),
+        )
         return sized
+
+    def _build_entry_state(self, row: pd.Series, direction: int) -> PositionState:
+        funding_event_time = as_timestamp(row["execution_funding_time"])
+        entry_time = as_timestamp(row["execution_timestamp"])
+        return PositionState(
+            direction=direction,
+            size=float(row["target_size"]),
+            entry_basis=float(row["basis"]),
+            entry_pred_funding=float(row["pred_funding_1h"]),
+            entry_time=entry_time,
+            funding_event_time=funding_event_time,
+            min_exit_time=funding_event_time
+            + pd.Timedelta(minutes=self.config.timing.min_hold_minutes_after_funding),
+            max_exit_time=entry_time + pd.Timedelta(minutes=self.config.timing.max_hold_minutes),
+        )
+
+    @staticmethod
+    def _current_gross_exposure(states: dict[str, PositionState]) -> float:
+        return float(sum(abs(state.direction * state.size) for state in states.values()))
+
+    @staticmethod
+    def _current_active_count(states: dict[str, PositionState]) -> int:
+        return sum(1 for state in states.values() if state.direction != 0)
 
     def generate_target_positions(self, df: pd.DataFrame) -> pd.DataFrame:
         signal_df = self.position_sizing(self.generate_signal(df))
         results: list[dict[str, Any]] = []
-        states = {
-            symbol: PositionState()
-            for symbol in signal_df["symbol"].drop_duplicates().sort_values().tolist()
-        }
-        last_entry_times: dict[str, pd.Timestamp | None] = {symbol: None for symbol in states}
+        symbols = signal_df["symbol"].drop_duplicates().sort_values().tolist()
+        states = {str(symbol): PositionState() for symbol in symbols}
+        last_entry_times: dict[str, pd.Timestamp | None] = {str(symbol): None for symbol in symbols}
 
         for timestamp, timestamp_df in signal_df.groupby("timestamp", sort=True):
             bar_timestamp = as_timestamp(timestamp)
-            active_count = sum(1 for state in states.values() if state.direction != 0)
+            output_meta: dict[str, dict[str, Any]] = {
+                str(row["symbol"]): {
+                    "signal": "flat",
+                    "reason_code": "flat",
+                    "expected_hold_until": states[str(row["symbol"])].max_exit_time,
+                    "state_for_output": states[str(row["symbol"])],
+                }
+                for _, row in timestamp_df.iterrows()
+            }
+
+            for _, row in timestamp_df.iterrows():
+                symbol = str(row["symbol"])
+                exit_reason = self.apply_exit_rules(row, states[symbol])
+                if exit_reason is not None:
+                    output_meta[symbol] = {
+                        "signal": exit_reason,
+                        "reason_code": exit_reason,
+                        "expected_hold_until": None,
+                        "state_for_output": states[symbol],
+                    }
+                    states[symbol] = PositionState()
+
             candidates = timestamp_df.copy()
             candidates["entry_priority"] = candidates["carry_score"].abs()
-            candidates = candidates.sort_values("entry_priority", ascending=False)
+            candidates = candidates.loc[candidates["entry_side"] != "flat"].sort_values(
+                "entry_priority",
+                ascending=False,
+            )
+            top_n = self.config.risk.top_n_signals
+            if top_n is not None:
+                candidates = candidates.head(top_n)
 
             for _, row in candidates.iterrows():
                 symbol = str(row["symbol"])
+                if states[symbol].direction != 0:
+                    continue
+                if self._current_active_count(states) >= self.config.risk.max_active_symbols:
+                    continue
+                last_entry_time = last_entry_times[symbol]
+                cooldown_ok = True
+                if last_entry_time is not None:
+                    cooldown_ok = (
+                        (bar_timestamp - last_entry_time).total_seconds() / 3600.0
+                    ) >= float(self.config.min_signal_interval_hours)
+                if not cooldown_ok:
+                    continue
+
+                direction = 0
+                if int(row["entry_long_spot_short_perp"]) == 1:
+                    direction = 1
+                elif int(row["entry_short_spot_long_perp"]) == 1:
+                    direction = -1
+                if direction == 0:
+                    continue
+
+                proposed_state = self._build_entry_state(row, direction)
+                if (
+                    self._current_gross_exposure(states) + abs(proposed_state.size)
+                    > self.config.risk.max_gross_exposure
+                ):
+                    continue
+                states[symbol] = proposed_state
+                last_entry_times[symbol] = bar_timestamp
+                output_meta[symbol] = {
+                    "signal": str(row["entry_side"]),
+                    "reason_code": "entry_signal",
+                    "expected_hold_until": proposed_state.max_exit_time,
+                    "state_for_output": proposed_state,
+                }
+
+            gross_exposure = self._current_gross_exposure(states)
+            active_count = self._current_active_count(states)
+            for _, row in timestamp_df.iterrows():
+                symbol = str(row["symbol"])
                 state = states[symbol]
-                exit_reason = self.apply_exit_rules(row, state)
-                signal = "flat"
-                reason_code = "flat"
-                expected_hold_until = state.max_exit_time
-                state_for_output = state
-
-                if exit_reason is not None:
-                    state_for_output = state
-                    states[symbol] = PositionState()
-                    active_count = sum(1 for item in states.values() if item.direction != 0)
-                    signal = exit_reason
-                    reason_code = exit_reason
-                    expected_hold_until = None
-                elif state.direction == 0 and active_count < self.config.risk.max_positions:
-                    direction = 0
-                    entry_side = "flat"
-                    if int(row["entry_long_spot_short_perp"]) == 1:
-                        direction = 1
-                        entry_side = "long_spot_short_perp"
-                    elif int(row["entry_short_spot_long_perp"]) == 1:
-                        direction = -1
-                        entry_side = "short_spot_long_perp"
-
-                    last_entry_time = last_entry_times[symbol]
-                    cooldown_ok = True
-                    if last_entry_time is not None:
-                        cooldown_ok = (
-                            (bar_timestamp - last_entry_time).total_seconds() / 3600.0
-                        ) >= float(self.config.min_signal_interval_hours)
-
-                    funding_event_time = as_timestamp(row["execution_funding_time"])
-                    if direction != 0 and cooldown_ok:
-                        state = PositionState(
-                            direction=direction,
-                            size=float(row["target_size"]),
-                            entry_basis=float(row["basis"]),
-                            entry_pred_funding=float(row["pred_funding_1h"]),
-                            entry_time=as_timestamp(row["execution_timestamp"]),
-                            funding_event_time=funding_event_time,
-                            min_exit_time=funding_event_time
-                            + pd.Timedelta(
-                                minutes=self.config.timing.min_hold_minutes_after_funding,
-                            ),
-                            max_exit_time=as_timestamp(row["execution_timestamp"])
-                            + pd.Timedelta(minutes=self.config.timing.max_hold_minutes),
-                        )
-                        states[symbol] = state
-                        last_entry_times[symbol] = bar_timestamp
-                        active_count += 1
-                        signal = entry_side
-                        reason_code = "entry_signal"
-                        expected_hold_until = state.max_exit_time
-                        state_for_output = state
-
-                state = states[symbol]
+                meta = output_meta[symbol]
                 target_position = float(state.direction) * float(state.size)
                 entry_side = "flat"
                 if state.direction > 0:
                     entry_side = "long_spot_short_perp"
                 elif state.direction < 0:
                     entry_side = "short_spot_long_perp"
-
                 payload: dict[str, Any] = {str(key): value for key, value in row.to_dict().items()}
                 payload.update(
                     {
-                        "signal": signal,
+                        "signal": meta["signal"],
                         "target_position": target_position,
                         "entry_side": entry_side,
-                        "expected_hold_until": expected_hold_until,
-                        "reason_code": reason_code,
-                        "active_funding_event_time": state_for_output.funding_event_time,
-                        "min_exit_time": state_for_output.min_exit_time,
-                        "max_exit_time": state_for_output.max_exit_time,
+                        "expected_hold_until": meta["expected_hold_until"],
+                        "reason_code": meta["reason_code"],
+                        "active_funding_event_time": meta["state_for_output"].funding_event_time,
+                        "min_exit_time": meta["state_for_output"].min_exit_time,
+                        "max_exit_time": meta["state_for_output"].max_exit_time,
+                        "gross_exposure": gross_exposure,
+                        "active_symbol_count": active_count,
+                        "allocation_mode": self.config.risk.allocation_mode,
+                        "symbol_target_weight": state.size,
                     },
                 )
                 results.append(payload)
 
-        out = pd.DataFrame(results)
-        return out.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+        return pd.DataFrame(results).sort_values(["timestamp", "symbol"]).reset_index(drop=True)

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from hl_funding_carry.backtest.artifacts import regenerate_report, save_validation_summary
-from hl_funding_carry.data.ingestion import ingest_hyperliquid_batch
+from hl_funding_carry.data.ingestion import ingest_hyperliquid_batch, ingest_hyperliquid_bulk
 from hl_funding_carry.data.validation import validate_processed_directory
 from hl_funding_carry.experiments.runner import run_backtest, run_sweep, run_walkforward
 from hl_funding_carry.settings import (
@@ -198,11 +198,17 @@ def main(argv: Sequence[str] | None = None) -> None:
             parsed.output_dir,
             parsed.processed_dir,
         )
-        ingestion_result = ingest_hyperliquid_batch(ingest_config)
-        print("Funding Carry ingest completed")
-        print(f"raw_dir: {ingestion_result.raw_dir}")
-        print(f"processed_dir: {ingestion_result.processed_dir}")
-        print(ingestion_result.validation_summary.to_string(index=False))
+        if ingest_config.symbols is not None or ingest_config.chunk_size is not None:
+            bulk_result = ingest_hyperliquid_bulk(ingest_config)
+            print("Funding Carry bulk ingest completed")
+            print(f"summary_dir: {bulk_result.summary_dir}")
+            print(bulk_result.batch_summary.to_string(index=False))
+        else:
+            ingestion_result = ingest_hyperliquid_batch(ingest_config)
+            print("Funding Carry ingest completed")
+            print(f"raw_dir: {ingestion_result.raw_dir}")
+            print(f"processed_dir: {ingestion_result.processed_dir}")
+            print(ingestion_result.validation_summary.to_string(index=False))
         return
 
     if command == "validate-data":

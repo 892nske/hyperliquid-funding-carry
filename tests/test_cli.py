@@ -87,3 +87,45 @@ def test_cli_walkforward_runs(tmp_path, capsys):
     )
     captured = capsys.readouterr()
     assert "Funding Carry walk-forward summary" in captured.out
+
+
+def test_cli_bulk_ingest_runs(tmp_path, capsys):
+    main(
+        [
+            "ingest",
+            "--config",
+            str(CONFIG_DIR / "funding_carry.bulk.yaml"),
+            "--output-dir",
+            str(tmp_path / "raw"),
+            "--processed-dir",
+            str(tmp_path / "processed"),
+        ],
+    )
+    captured = capsys.readouterr()
+    assert "Funding Carry bulk ingest completed" in captured.out
+
+
+def test_cli_multi_backtest_and_walkforward_run(tmp_path, capsys):
+    main(
+        [
+            "backtest",
+            "--config",
+            str(CONFIG_DIR / "funding_carry.multi.yaml"),
+            "--output-dir",
+            str(tmp_path / "multi"),
+        ],
+    )
+    captured = capsys.readouterr()
+    assert "Funding Carry backtest summary" in captured.out
+
+    main(
+        [
+            "walkforward",
+            "--config",
+            str(CONFIG_DIR / "funding_carry.multi_walkforward.yaml"),
+            "--output-dir",
+            str(tmp_path / "multi_wf"),
+        ],
+    )
+    captured = capsys.readouterr()
+    assert "Funding Carry walk-forward summary" in captured.out

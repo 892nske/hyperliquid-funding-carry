@@ -13,6 +13,7 @@ def summarize_validation_report(df: pd.DataFrame, dataset_name: str) -> Validati
         return ValidationReport(
             dataset=dataset_name,
             row_count=0,
+            symbol_count=0,
             missing_ratio=0.0,
             duplicate_count=0,
             non_monotonic_count=0,
@@ -26,6 +27,7 @@ def summarize_validation_report(df: pd.DataFrame, dataset_name: str) -> Validati
     ordered["timestamp"] = pd.to_datetime(ordered["timestamp"], utc=True)
     ordered = ordered.sort_values(["symbol", "timestamp"]).reset_index(drop=True)
     duplicate_count = int(ordered.duplicated(subset=["timestamp", "symbol"]).sum())
+    symbol_count = int(ordered["symbol"].nunique())
     missing_ratio = float(ordered.isna().mean().mean())
     non_monotonic_count = 0
     gap_count = 0
@@ -48,6 +50,7 @@ def summarize_validation_report(df: pd.DataFrame, dataset_name: str) -> Validati
     return ValidationReport(
         dataset=dataset_name,
         row_count=int(len(ordered)),
+        symbol_count=symbol_count,
         missing_ratio=missing_ratio,
         duplicate_count=duplicate_count,
         non_monotonic_count=non_monotonic_count,
@@ -64,6 +67,7 @@ def validation_report_to_frame(report: ValidationReport) -> pd.DataFrame:
             {
                 "dataset": report.dataset,
                 "row_count": report.row_count,
+                "symbol_count": report.symbol_count,
                 "missing_ratio": report.missing_ratio,
                 "duplicate_count": report.duplicate_count,
                 "non_monotonic_count": report.non_monotonic_count,
@@ -77,15 +81,22 @@ def validation_report_to_frame(report: ValidationReport) -> pd.DataFrame:
 
 
 def validate_processed_directory(processed_dir: Path) -> pd.DataFrame:
+    recursive = not any(
+        (processed_dir / f"candles{suffix}").exists() for suffix in (".parquet", ".csv", ".json")
+    )
     reports = [
         validation_report_to_frame(summarize_validation_report(frame, dataset_name))
-        for dataset_name, frame in load_processed_dataset_tables(processed_dir).items()
+        for dataset_name, frame in load_processed_dataset_tables(
+            processed_dir,
+            recursive=recursive,
+        ).items()
     ]
     if not reports:
         return pd.DataFrame(
             columns=[
                 "dataset",
                 "row_count",
+                "symbol_count",
                 "missing_ratio",
                 "duplicate_count",
                 "non_monotonic_count",
